@@ -84,7 +84,7 @@ pip install textual aiohttp
 
 ```bash
 git clone <repository-url>
-cd container-card-catalog
+cd container-registry-card-catalog
 python container_card_catalog.py --mock
 ```
 
@@ -118,6 +118,8 @@ The application includes comprehensive mock data for testing and development:
 The application supports multiple registry types:
 
 ### Remote Registries (Docker Registry HTTP API v2)
+⚠️ **Anonymous access only** - Authentication not yet implemented
+
 - Docker Hub
 - Quay.io  
 - Google Container Registry (GCR)
@@ -126,8 +128,8 @@ The application supports multiple registry types:
 - Self-hosted registries (Harbor, Distribution, etc.)
 
 ### Local Container Runtimes
-- **Podman** - Full support with metadata extraction
-- **Docker** - Full support with metadata extraction
+- **Podman** - Full support with metadata extraction (tested and verified)
+- **Docker** - Full support with metadata extraction ⚠️ **(untested - podman-compatible implementation)**
 - Automatic detection of container runtime capabilities
 
 ## API Compatibility
