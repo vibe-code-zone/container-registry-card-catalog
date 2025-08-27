@@ -19,6 +19,7 @@ from textual.screen import Screen
 from textual.message import Message
 from textual.events import MouseDown
 from local_container_client import LocalContainerClient
+from registry_client import sort_tags_by_timestamp
 
 
 class TagDetailsPanel(Static):
@@ -313,22 +314,50 @@ class TagsScreen(Screen):
             registry_manager.add_api_call(tags_response)
             
             if tags_response["status_code"] == 200:
-                all_available_tags = tags_response.get("json", {}).get("tags", [])
+                response_json = tags_response.get("json", {})
+                all_available_tags = response_json.get("tags", [])
+                manifest_metadata = response_json.get("manifest", {})
+                
+                # Sort tags using timestamp-based sorting
+                sorted_available_tags = sort_tags_by_timestamp(all_available_tags, manifest_metadata)
+                
+                # Build tag-to-timestamp mapping for display dates
+                tag_timestamps = {}
+                for manifest_sha, manifest_data in manifest_metadata.items():
+                    tags_for_manifest = manifest_data.get("tag", [])
+                    time_uploaded = manifest_data.get("timeUploadedMs", "0")
+                    time_created = manifest_data.get("timeCreatedMs", "0")
+                    
+                    # Use upload time if available, otherwise creation time
+                    timestamp = int(time_uploaded) if time_uploaded != "0" else int(time_created)
+                    
+                    for tag in tags_for_manifest:
+                        tag_timestamps[tag] = timestamp
                 
                 # Load tag data (limit to current limit for auto-loading)
-                all_tags = all_available_tags[:self.current_limit]
+                all_tags = sorted_available_tags[:self.current_limit]
                 
                 # Check if we've loaded all available tags
-                if len(all_tags) >= len(all_available_tags):
+                if len(all_tags) >= len(sorted_available_tags):
                     self.all_tags_loaded = True
                 
                 for tag_name in all_tags:
+                    # Get timestamp and convert to human readable
+                    timestamp = tag_timestamps.get(tag_name, 0)
+                    if timestamp > 0:
+                        import datetime
+                        # Convert from milliseconds to seconds for datetime
+                        dt = datetime.datetime.fromtimestamp(timestamp / 1000)
+                        created_str = dt.strftime("%Y-%m-%d %H:%M")
+                    else:
+                        created_str = "Unknown"
+                    
                     tag_data = {
                         "tag": tag_name,
                         "repository": repo_name,
                         "registry_url": registry_url,
                         "size": "Unknown",  # TODO: Get from manifest
-                        "created": "Unknown",  # TODO: Get from manifest
+                        "created": created_str,
                         "digest": "Unknown"  # TODO: Get from manifest
                     }
                     
@@ -436,11 +465,30 @@ class TagsScreen(Screen):
             registry_manager.add_api_call(tags_response)
             
             if tags_response["status_code"] == 200:
-                all_available_tags = tags_response.get("json", {}).get("tags", [])
+                response_json = tags_response.get("json", {})
+                all_available_tags = response_json.get("tags", [])
+                manifest_metadata = response_json.get("manifest", {})
+                
+                # Sort all tags using timestamp-based sorting
+                sorted_available_tags = sort_tags_by_timestamp(all_available_tags, manifest_metadata)
+                
+                # Build tag-to-timestamp mapping for display dates
+                tag_timestamps = {}
+                for manifest_sha, manifest_data in manifest_metadata.items():
+                    tags_for_manifest = manifest_data.get("tag", [])
+                    time_uploaded = manifest_data.get("timeUploadedMs", "0")
+                    time_created = manifest_data.get("timeCreatedMs", "0")
+                    
+                    # Use upload time if available, otherwise creation time
+                    timestamp = int(time_uploaded) if time_uploaded != "0" else int(time_created)
+                    
+                    for tag in tags_for_manifest:
+                        tag_timestamps[tag] = timestamp
+                
                 current_count = len(self.tag_data)
                 
-                # Get the next batch of tags
-                new_tags = all_available_tags[current_count:self.current_limit]
+                # Get the next batch of tags from sorted list
+                new_tags = sorted_available_tags[current_count:self.current_limit]
                 
                 if not new_tags:
                     self.all_tags_loaded = True
@@ -451,12 +499,22 @@ class TagsScreen(Screen):
                 tags_table = self.query_one("#tags_list", DataTable)
                 
                 for tag_name in new_tags:
+                    # Get timestamp and convert to human readable
+                    timestamp = tag_timestamps.get(tag_name, 0)
+                    if timestamp > 0:
+                        import datetime
+                        # Convert from milliseconds to seconds for datetime
+                        dt = datetime.datetime.fromtimestamp(timestamp / 1000)
+                        created_str = dt.strftime("%Y-%m-%d %H:%M")
+                    else:
+                        created_str = "Unknown"
+                    
                     tag_data = {
                         "tag": tag_name,
                         "repository": repo_name,
                         "registry_url": registry_url,
                         "size": "Unknown",  # TODO: Get from manifest
-                        "created": "Unknown",  # TODO: Get from manifest
+                        "created": created_str,
                         "digest": "Unknown"  # TODO: Get from manifest
                     }
                     

@@ -8,14 +8,18 @@ A Terminal User Interface (TUI) application for browsing and exploring container
 
 🌐 **Multi-Registry Support** - Connect to multiple container registries simultaneously  
 🏠 **Local Container Support** - Browse local podman/docker containers with full metadata  
+🔐 **Authentication Support** - Configure credentials for registries (basic, bearer, token auth)  
+⭐ **Monitored Repositories** - Priority repositories always fetched first with full tag info and visual indicators  
+📊 **Smart Repository Counts** - Display format shows total(monitored) e.g., "1003(3)" for comprehensive status  
+💾 **In-Memory Configuration** - Registry settings persist during session (file persistence planned)  
 📦 **Repository Browsing** - Navigate through repositories with an intuitive interface  
-🏷️ **Tag Exploration** - View and explore container image tags with detailed information  
+🏷️ **Tag Exploration** - View and explore container image tags with chronological sorting and real timestamps  
 📋 **Manifest Details** - Deep dive into image manifests, layers, and digests (local & remote)  
 📋 **Layer Inspection** - View layer information, media types, and sizes  
 📎 **Clipboard Integration** - Copy digests to clipboard with platform detection  
 🔍 **Debug Console** - Monitor API calls and responses for troubleshooting  
 🧪 **Mock Mode** - Test with realistic mock data without real registry connections  
-🚀 **Auto-Loading** - Smart pagination for datasets over 1000 items  
+🚀 **Auto-Loading** - Smart pagination for datasets over 1000 items with cursor preservation  
 🖱️ **Double-Click Navigation** - Double-click any row to navigate or view details  
 ⌨️ **Flexible Navigation** - Multiple ways to navigate (keyboard, mouse, shortcuts)  
 
@@ -51,10 +55,13 @@ python container_registry_card_catalog.py --help
 - **Escape/Backspace**: Go back or close modals
 - **Ctrl+Q**: Quit application (works everywhere)
 - **Ctrl+D**: Open debug console
+- **C**: Configure registry with authentication and monitored repositories (remote registries only)
 - **R**: Refresh current view
 - **L**: Load more items
 - **Ctrl+X**: Purge debug log (debug console only)
 - **Ctrl+C**: Copy digest to clipboard (tag detail modal)
+- **Ctrl+F**: Focus repository filter
+- **Tab**: Toggle focus between filter and table
 
 ### Modal Navigation
 
@@ -62,6 +69,13 @@ python container_registry_card_catalog.py --help
 - **Up/Down**: Same as Page Up/Down in modals
 - **Enter**: Close modal
 - **Escape**: Close modal
+
+### Visual Indicators
+
+- **⭐**: Monitored repositories (always appear first with full tag information)
+- **📦**: Regular catalog repositories  
+- **❌**: Failed/error repositories
+- **Repository counts**: `total(monitored)` format - e.g., "1003(3)" shows 1003 total repositories with 3 monitored
 
 ## Installation
 
@@ -118,14 +132,15 @@ The application includes comprehensive mock data for testing and development:
 The application supports multiple registry types:
 
 ### Remote Registries (Docker Registry HTTP API v2)
-⚠️ **Anonymous access only** - Authentication not yet implemented
+✅ **Authentication Support** - Basic, Bearer, and Token authentication implemented
 
-- Docker Hub
-- Quay.io  
-- Google Container Registry (GCR)
-- Amazon Elastic Container Registry (ECR)
-- Azure Container Registry (ACR)
-- Self-hosted registries (Harbor, Distribution, etc.)
+- **Docker Hub** - Bearer token authentication
+- **Quay.io** - Token auth with robot accounts  
+- **Google Container Registry (GCR)** - OAuth token support
+- **Amazon Elastic Container Registry (ECR)** - AWS token support
+- **Azure Container Registry (ACR)** - Standard authentication
+- **Harbor** - Basic auth and robot accounts
+- **Self-hosted registries** - Generic authentication support
 
 ### Local Container Runtimes
 - **Podman** - Full support with metadata extraction (tested and verified)
@@ -165,7 +180,7 @@ This project was generated with AI assistance (Claude by Anthropic) with human g
 - Interpretation: https://aiattribution.github.io/interpret-attribution
 - More: https://aiattribution.github.io/
 - Vibe-Coder: Andrew Potozniak <potozniak@redhat.com>
-- Session Date: 2025-08-15 (Original), 2025-08-16 (Enhanced)
+- Session Date: 2025-08-15 (Original), 2025-08-16 (Enhanced), 2025-08-27 (Auth & Monitoring)
 
 ## Licensing
 
@@ -181,9 +196,11 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Roadmap
 
-- [ ] Authentication support (bearer token and basic authentication)
-- [ ] TLS/HTTPS with certificate validation
-- [ ] Export functionality (save repository lists, tag information)
-- [ ] Configuration file support
-- [ ] Search and filtering capabilities
-- [ ] Image comparison features
+- [x] **Authentication support** - Basic, bearer, and token authentication ✅
+- [x] **Search and filtering capabilities** - Repository name filtering ✅
+- [x] **Monitored repositories** - Priority repo configuration ✅
+- [ ] **TLS/HTTPS with certificate validation** - Currently disabled for compatibility
+- [ ] **Export functionality** - Save repository lists, tag information  
+- [ ] **Configuration file support** - Persistent auth and monitored repos storage
+- [ ] **Image comparison features** - Compare tags and manifests
+- [ ] **Registry state persistence** - Remember pagination/position when navigating

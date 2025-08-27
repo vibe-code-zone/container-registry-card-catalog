@@ -161,8 +161,11 @@ class RegistryDetailsPanel(Vertical):
             base_url = registry_info.get('url', 'Unknown')
             registry_hash = registry_info.get('registry_hash', 'Unknown')
             
+            # Determine if configuration is available for this registry type
+            is_local_runtime = base_url.startswith('local://')
+            
             # Handle different registry types
-            if base_url.startswith('local://'):
+            if is_local_runtime:
                 runtime = base_url.split('://')[1]
                 details = f"""🏠 Local Runtime: {runtime.title()}
 📡 Endpoint: {base_url}
@@ -199,13 +202,31 @@ class RegistryDetailsPanel(Vertical):
 🏷️ API Version: {registry_info.get('api_version', 'Unknown')}
 🔗 Connection: {registry_info.get('connection_status', 'Unknown')}
 🔗 Registry Hash: {registry_hash}"""
+            
+            # Add monitored repositories info if configured
+            monitored_repos = registry_info.get('monitored_repos', [])
+            if monitored_repos:
+                details += f"\n\n📌 Monitored Repositories: {len(monitored_repos)}"
+                for repo in monitored_repos[:3]:  # Show first 3
+                    details += f"\n   ⭐ {repo}"
+                if len(monitored_repos) > 3:
+                    details += f"\n   ... and {len(monitored_repos) - 3} more"
+            
             # TODO: Add SSL status validation once SSL verification is implemented
             
             details_text.update(details)
-            configure_button.disabled = False
+            
+            # Disable configuration for local runtimes (podman/docker)
+            if is_local_runtime:
+                configure_button.disabled = True
+                configure_button.label = "Local Runtime - No Config"
+            else:
+                configure_button.disabled = False
+                configure_button.label = "Configure Registry"
         else:
             details_text.update("Select a registry to view details")
             configure_button.disabled = True
+            configure_button.label = "Configure Registry"
     
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle configure button press"""
@@ -332,9 +353,10 @@ class RepositoryScreen(Screen):
         ("l", "load_more", "Load More"),
     ]
     
-    def __init__(self, registry_info: dict, mock_mode: bool = False, **kwargs):
+    def __init__(self, registry_info: dict, registry_config: dict = None, mock_mode: bool = False, **kwargs):
         super().__init__(**kwargs)
         self.registry_info = registry_info
+        self.registry_config = registry_config or {}
         self.mock_mode = mock_mode
         self.repository_data = []
         self.current_limit = 1000
@@ -355,7 +377,7 @@ class RepositoryScreen(Screen):
         """Check if repository filter is currently active"""
         return bool(self.filter_text.strip())
     
-    def apply_filter(self) -> None:
+    def apply_filter(self, preserve_cursor: bool = False) -> None:
         """Apply current filter to repository data and update table"""
         if not self.filter_text.strip():
             # No filter - show all repositories
@@ -369,19 +391,34 @@ class RepositoryScreen(Screen):
             ]
         
         # Rebuild table with filtered data
-        self.rebuild_repository_table()
+        self.rebuild_repository_table(preserve_cursor=preserve_cursor)
         
         # Update title to show filter status
         self.update_title()
     
-    def rebuild_repository_table(self) -> None:
+    def rebuild_repository_table(self, preserve_cursor: bool = False) -> None:
         """Rebuild the repository table with current filtered data"""
         repo_table = self.query_one("#repository_list", DataTable)
+        
+        # Save current cursor position if preserving
+        saved_cursor = None
+        if preserve_cursor and hasattr(repo_table, 'cursor_coordinate') and repo_table.cursor_coordinate:
+            saved_cursor = repo_table.cursor_coordinate
+        
         repo_table.clear()
         
         for repo_data in self.filtered_repository_data:
+            # Use different emoji for monitored vs catalog repos
+            if repo_data.get('is_monitored', False):
+                if repo_data.get('is_error', False):
+                    icon = "❌"  # Error fetching monitored repo
+                else:
+                    icon = "⭐"  # Successfully fetched monitored repo
+            else:
+                icon = "📦"  # Regular catalog repo
+            
             repo_table.add_row(
-                "📦",
+                icon,
                 self.registry_info.get('name', 'Unknown'),
                 repo_data["name"],
                 str(repo_data.get("tag_count", "Unknown")),
@@ -389,8 +426,11 @@ class RepositoryScreen(Screen):
                 repo_data.get("last_updated", "Unknown")
             )
         
-        # Auto-select first row if data exists
-        if self.filtered_repository_data:
+        # Restore cursor position or auto-select first row
+        if preserve_cursor and saved_cursor and saved_cursor[0] < len(self.filtered_repository_data):
+            repo_table.cursor_coordinate = saved_cursor
+            self.update_details_for_row(saved_cursor[0])
+        elif self.filtered_repository_data:
             repo_table.cursor_coordinate = (0, 0)
             self.update_details_for_row(0)
             # Focus table after filtering unless filter input has focus
@@ -687,8 +727,16 @@ class RepositoryScreen(Screen):
         sort_direction = "Z→A" if self.sort_reversed else "A→Z"
         self.notify(f"Repository sort: {sort_direction}")
         
-        # Re-sort existing repository data
-        self.repository_data.sort(key=lambda x: x['name'].lower(), reverse=self.sort_reversed)
+        # Re-sort existing repository data with monitored repos always at top
+        monitored_repos = [repo for repo in self.repository_data if repo.get('is_monitored', False)]
+        catalog_repos = [repo for repo in self.repository_data if not repo.get('is_monitored', False)]
+        
+        # Sort each group separately 
+        monitored_repos.sort(key=lambda x: x['name'].lower(), reverse=self.sort_reversed)
+        catalog_repos.sort(key=lambda x: x['name'].lower(), reverse=self.sort_reversed)
+        
+        # Combine with monitored repos always first
+        self.repository_data = monitored_repos + catalog_repos
         
         # Apply filter to rebuild table with sorted data
         self.apply_filter()
@@ -711,18 +759,20 @@ class RepositoryScreen(Screen):
         if not registry_url:
             return
         
-        # Get auth config for this registry and determine actual limit
-        auth_config = self.app.registry_auth.get(registry_url) if hasattr(self.app, 'registry_auth') else None
+        # Get registry config for this registry and determine actual limit
+        registry_config = self.registry_config
         actual_limit = limit
         
         debug_logger.debug("Determining repository limit", 
                           input_limit=limit,
-                          has_auth_config=bool(auth_config),
-                          auth_config_max_repos=auth_config.get('max_repos') if auth_config else 'NO_AUTH_CONFIG')
+                          has_registry_config=bool(registry_config),
+                          registry_config_max_repos=registry_config.get('max_repos') if registry_config else 'NO_REGISTRY_CONFIG',
+                          monitored_repos_count=len(registry_config.get('monitored_repos', [])) if registry_config else 0,
+                          monitored_repos=registry_config.get('monitored_repos', []) if registry_config else 'NO_REGISTRY_CONFIG')
         
-        if auth_config and 'max_repos' in auth_config:
-            actual_limit = auth_config['max_repos']
-            debug_logger.debug("Using auth config max_repos", 
+        if registry_config and 'max_repos' in registry_config:
+            actual_limit = registry_config['max_repos']
+            debug_logger.debug("Using registry config max_repos", 
                               actual_limit=actual_limit)
         elif limit is None:
             actual_limit = 100  # Default fallback
@@ -748,12 +798,20 @@ class RepositoryScreen(Screen):
                               registry_name=self.registry_info["name"],
                               limit=actual_limit)
             
-            result = await registry_manager.get_repositories(registry_url, actual_limit, auth_config)
+            result = await registry_manager.get_repositories(registry_url, actual_limit, registry_config)
             
             # Handle new pagination response format
             if isinstance(result, dict) and "repositories" in result:
                 repositories = result["repositories"]
                 pagination_info = result["pagination"]
+                monitored_status = result.get("monitored_repos_status", {})
+                
+                # Handle monitored repository status and notifications
+                if monitored_status.get("failed"):
+                    failed_repos = monitored_status["failed"]
+                    for failed_repo in failed_repos:
+                        self.notify(f"⚠️ Monitored repo '{failed_repo['name']}' failed: {failed_repo['error']}", 
+                                   severity="warning", timeout=5)
                 
                 # Store pagination state for Link header continuation
                 self.next_page_token = pagination_info.get("next_page_token")
@@ -787,6 +845,12 @@ class RepositoryScreen(Screen):
         
         for repo_data in repositories:
             self.repository_data.append(repo_data)
+            # Debug log each repo as it's added
+            if repo_data.get('is_monitored', False):
+                debug_logger.debug("Added monitored repository to UI", 
+                                  repo_name=repo_data['name'],
+                                  tag_count=repo_data.get('tag_count', 'Unknown'),
+                                  is_error=repo_data.get('is_error', False))
         
         # Apply filter to populate table with new data
         self.apply_filter()
@@ -861,8 +925,8 @@ class RepositoryScreen(Screen):
             
             self.repository_data.append(repo_data)
         
-        # Apply filter to update table with new data
-        self.apply_filter()
+        # Apply filter to update table with new data (preserve cursor during auto-loading)
+        self.apply_filter(preserve_cursor=True)
         
         # Check if we've loaded everything
         if len(self.repository_data) >= len(all_repositories):
@@ -881,8 +945,8 @@ class RepositoryScreen(Screen):
         current_count = len(self.repository_data)
         batch_size = 100  # Load 100 more at a time
         
-        # Get auth config for this registry
-        auth_config = self.app.registry_auth.get(registry_url) if hasattr(self.app, 'registry_auth') else None
+        # Get registry config for this registry
+        registry_config = self.registry_config
         
         # Choose pagination method based on available state
         if self.next_page_token and self.pagination_method == "link_header":
@@ -896,7 +960,7 @@ class RepositoryScreen(Screen):
             result = await registry_manager.continue_repositories_pagination(
                 registry_url, 
                 self.next_page_token,
-                auth_config=auth_config,
+                registry_config=registry_config,
                 page_size=batch_size
             )
             
@@ -920,7 +984,7 @@ class RepositoryScreen(Screen):
                     registry_url, 
                     limit=batch_size,
                     offset=current_count,
-                    auth_config=auth_config
+                    registry_config=registry_config
                 )
                 
                 # Handle fallback response
@@ -956,7 +1020,7 @@ class RepositoryScreen(Screen):
                 registry_url, 
                 limit=batch_size,
                 offset=current_count,
-                auth_config=auth_config
+                registry_config=registry_config
             )
             
             # Handle response format
@@ -991,8 +1055,8 @@ class RepositoryScreen(Screen):
         for repo_data in new_repos:
             self.repository_data.append(repo_data)
         
-        # Apply filter to update table with new data
-        self.apply_filter()
+        # Apply filter to update table with new data (preserve cursor during auto-loading)
+        self.apply_filter(preserve_cursor=True)
         
         # Note: all_repositories_loaded is already set correctly based on pagination metadata above
         # No need to override it with legacy current_limit logic
@@ -1007,15 +1071,61 @@ class RepositoryScreen(Screen):
     
     def action_refresh(self) -> None:
         """Refresh repositories"""
+        debug_logger.debug("Repository refresh triggered", 
+                          screen_type="RepositoryScreen",
+                          current_repo_count=len(self.repository_data),
+                          has_registry_config=bool(self.registry_config),
+                          monitored_repos_count=len(self.registry_config.get('monitored_repos', [])) if self.registry_config else 0,
+                          monitored_repos=self.registry_config.get('monitored_repos', []) if self.registry_config else [])
+        
         self.notify("Refreshing repositories...")
-        # Clear existing data
+        
+        # Save current cursor position to restore after refresh
         repo_table = self.query_one("#repository_list", DataTable)
+        cursor_row = 0
+        if hasattr(repo_table, 'cursor_coordinate') and repo_table.cursor_coordinate:
+            cursor_row = repo_table.cursor_coordinate[0]
+        
+        # Clear existing data
         repo_table.clear()
         self.repository_data = []
         self.filtered_repository_data = []
         
+        # Reset pagination state
+        self.current_offset = 0
+        self.current_limit = 50
+        self.all_repositories_loaded = False
+        
+        debug_logger.debug("Repository data cleared, reloading...", 
+                          preserved_cursor_row=cursor_row)
+        
         # Reload repositories
         self.load_repositories()
+        
+        # Restore cursor position after data loads
+        if cursor_row > 0:
+            self.call_later(lambda: self._restore_cursor_position(cursor_row))
+    
+    def _restore_cursor_position(self, cursor_row: int) -> None:
+        """Restore cursor position after refresh"""
+        try:
+            repo_table = self.query_one("#repository_list", DataTable)
+            if len(self.repository_data) > cursor_row:
+                repo_table.cursor_coordinate = (cursor_row, 0)
+                self.update_details_for_row(cursor_row)
+                debug_logger.debug("Cursor position restored", 
+                                  restored_row=cursor_row)
+            elif len(self.repository_data) > 0:
+                # Fallback to first row if original position is out of bounds
+                repo_table.cursor_coordinate = (0, 0)
+                self.update_details_for_row(0)
+                debug_logger.debug("Cursor position fallback", 
+                                  original_row=cursor_row,
+                                  fallback_row=0)
+        except Exception as e:
+            debug_logger.debug("Failed to restore cursor position", 
+                              error=str(e),
+                              target_row=cursor_row)
     
     def action_load_more(self) -> None:
         """Load more repositories"""
@@ -1046,6 +1156,46 @@ class RepositoryScreen(Screen):
         else:
             filter_input.focus()
     
+    async def on_registry_config_modal_config_saved(self, message: RegistryConfigModal.ConfigSaved) -> None:
+        """Handle configuration saved from modal in repository screen"""
+        config = message.registry_config
+        registry_url = config['registry_url']
+        
+        debug_logger.debug("Repository screen received config update", 
+                          screen_type="RepositoryScreen",
+                          registry_url=registry_url,
+                          current_registry=self.registry_info.get('url'),
+                          monitored_repos_count=len(config.get('monitored_repos', [])),
+                          monitored_repos=config.get('monitored_repos', []),
+                          is_for_current_registry=(registry_url == self.registry_info.get('url')))
+        
+        # Check if this config update is for our current registry
+        if registry_url == self.registry_info.get('url'):
+            # Update our local registry config
+            self.registry_config = {
+                'username': config.get('username', ''),
+                'password': config.get('password', ''),
+                'auth_type': config.get('auth_type', 'none'),
+                'registry_type': config.get('registry_type', 'auto'),
+                'auth_scope': config.get('auth_scope', 'registry:catalog:*'),
+                'max_repos': config.get('max_repos', 100),
+                'cache_ttl': config.get('cache_ttl', 900),
+                'monitored_repos': config.get('monitored_repos', [])
+            }
+            
+            debug_logger.debug("Registry config updated in repository screen", 
+                              monitored_repos=config.get('monitored_repos', []),
+                              triggering_refresh=True)
+            
+            self.notify(f"✅ Configuration updated - refreshing repositories...")
+            
+            # Trigger a repository refresh to fetch new monitored repos
+            self.action_refresh()
+        else:
+            debug_logger.debug("Config update ignored - not for current registry", 
+                              config_registry=registry_url,
+                              current_registry=self.registry_info.get('url'))
+
     def action_quit(self) -> None:
         """Quit the application"""
         self.app.exit()
@@ -1100,7 +1250,7 @@ class ContainerCardCatalog(App):
         self.last_click_time = 0
         self.last_clicked_row = -1
         self.sort_reversed = False
-        self.registry_auth = {}  # In-memory auth storage: {registry_url: {username, password, auth_type}}
+        self.registry_config = {}  # In-memory registry config storage: {registry_url: {username, password, auth_type, monitored_repos, etc}}
         
     def compose(self) -> ComposeResult:
         """Create the TUI layout"""
@@ -1236,6 +1386,10 @@ class ContainerCardCatalog(App):
             # Create detailed info for selected registry
             registry_url = registry["url"]
             
+            # Get monitored repos from auth config if available
+            registry_config = self.registry_config.get(registry_url, {}) if hasattr(self, 'registry_config') else {}
+            monitored_repos = registry_config.get('monitored_repos', [])
+            
             if registry_url.startswith("local://"):
                 # Local runtime details
                 runtime = registry_url.split("://")[1]
@@ -1249,7 +1403,8 @@ class ContainerCardCatalog(App):
                     "repo_count": str(repo_count),
                     "api_version": registry["api_version"],
                     "connection_status": registry.get("connection_status", "Local filesystem"),
-                    "registry_hash": f"local:{runtime}{hash(registry_url) % 1000:03d}"
+                    "registry_hash": f"local:{runtime}{hash(registry_url) % 1000:03d}",
+                    "monitored_repos": monitored_repos
                 }
             elif registry_url.startswith("mock://"):
                 # Mock registry details
@@ -1262,7 +1417,8 @@ class ContainerCardCatalog(App):
                     "repo_count": str(repo_count),
                     "api_version": registry["api_version"],
                     "connection_status": "Mock",
-                    "registry_hash": f"sha256:reg{hash(registry_url) % 1000000:06d}"
+                    "registry_hash": f"sha256:reg{hash(registry_url) % 1000000:06d}",
+                    "monitored_repos": monitored_repos
                 }
             else:
                 # Real HTTP registry details
@@ -1275,7 +1431,8 @@ class ContainerCardCatalog(App):
                     "repo_count": str(repo_count),
                     "api_version": registry["api_version"],
                     "connection_status": registry.get("connection_status", "Unknown"),
-                    "registry_hash": registry.get("registry_hash", "Unknown")
+                    "registry_hash": registry.get("registry_hash", "Unknown"),
+                    "monitored_repos": monitored_repos
                 }
             
             details_panel.update_registry_info(detailed_info)
@@ -1335,7 +1492,10 @@ class ContainerCardCatalog(App):
             "api_version": registry["api_version"],
             "status": registry["status"]
         }
-        repo_screen = RepositoryScreen(registry_info=registry_info, mock_mode=self.mock_mode)
+        
+        # Pass the registry config to the repository screen
+        registry_config = self.registry_config.get(registry["url"], {})
+        repo_screen = RepositoryScreen(registry_info=registry_info, registry_config=registry_config, mock_mode=self.mock_mode)
         self.app.push_screen(repo_screen)
     
     def action_refresh(self) -> None:
@@ -1415,8 +1575,8 @@ class ContainerCardCatalog(App):
                         }
                 else:
                     # Get auth config for this registry
-                    auth_config = self.registry_auth.get(registry_url)
-                    status_info = await registry_manager.check_registry_status(registry_url, auth_config)
+                    registry_config = self.registry_config.get(registry_url)
+                    status_info = await registry_manager.check_registry_status(registry_url, registry_config)
                 
                 # Update the registry data
                 self.registry_data[registry_row_index].update({
@@ -1483,21 +1643,27 @@ class ContainerCardCatalog(App):
             row_index = registry_table.cursor_coordinate[0]
             if row_index < len(self.registry_data):
                 registry = self.registry_data[row_index]
+                registry_url = registry.get('url', '')
+                
+                # Check if this registry type supports configuration
+                if registry_url.startswith('local://'):
+                    self.notify("Local runtimes don't require configuration", severity="info")
+                    return
                 
                 # Get saved auth data for this registry
-                registry_url = registry.get('url', '')
-                saved_auth = self.registry_auth.get(registry_url, {})
+                saved_config = self.registry_config.get(registry_url, {})
                 
                 # Create registry data for modal
                 registry_data = {
                     'name': registry.get('name', 'Unknown'),
                     'url': registry_url,
-                    'username': saved_auth.get('username', ''),
-                    'auth_type': saved_auth.get('auth_type', 'bearer'),
-                    'registry_type': saved_auth.get('registry_type', ''),
-                    'auth_scope': saved_auth.get('auth_scope', 'registry:catalog:*'),
-                    'max_repos': saved_auth.get('max_repos', 100),
-                    'cache_ttl': saved_auth.get('cache_ttl', 900)
+                    'username': saved_config.get('username', ''),
+                    'auth_type': saved_config.get('auth_type', 'bearer'),
+                    'registry_type': saved_config.get('registry_type', ''),
+                    'auth_scope': saved_config.get('auth_scope', 'registry:catalog:*'),
+                    'max_repos': saved_config.get('max_repos', 100),
+                    'cache_ttl': saved_config.get('cache_ttl', 900),
+                    'monitored_repos': saved_config.get('monitored_repos', [])
                 }
                 
                 # Open configuration modal
@@ -1520,17 +1686,20 @@ class ContainerCardCatalog(App):
                           auth_type=config.get('auth_type', 'none'),
                           username=config.get('username', ''),
                           password=config.get('password', ''),  # Will be masked
-                          max_repos=config.get('max_repos', 100))
+                          max_repos=config.get('max_repos', 100),
+                          monitored_repos_count=len(config.get('monitored_repos', [])),
+                          monitored_repos=config.get('monitored_repos', []))
         
         # Store auth credentials in memory
-        self.registry_auth[registry_url] = {
+        self.registry_config[registry_url] = {
             'username': config.get('username', ''),
             'password': config.get('password', ''),
             'auth_type': config.get('auth_type', 'none'),
             'registry_type': config.get('registry_type', 'auto'),
             'auth_scope': config.get('auth_scope', 'registry:catalog:*'),
             'max_repos': config.get('max_repos', 100),
-            'cache_ttl': config.get('cache_ttl', 900)
+            'cache_ttl': config.get('cache_ttl', 900),
+            'monitored_repos': config.get('monitored_repos', [])
         }
         
         # Update registry data with auth info for display
@@ -1546,10 +1715,10 @@ class ContainerCardCatalog(App):
             current_row = registry_table.cursor_coordinate[0]
             self.update_details_for_row(current_row)
         
-        self.notify(f"✅ {config['registry_name']} authentication configured")
+        self.notify(f"✅ {config['registry_name']} configuration saved")
         
-        debug_logger.debug("Auth config stored in memory", 
-                          registry_count=len(self.registry_auth),
+        debug_logger.debug("Registry config stored in memory", 
+                          registry_count=len(self.registry_config),
                           has_credentials=bool(config.get('username')))
         
         # Automatically refresh this registry's status
@@ -1583,10 +1752,10 @@ class ContainerCardCatalog(App):
                           registry_name=self.registry_data[registry_row_index].get('name', 'Unknown'))
         
         # Get auth config and check status
-        auth_config = self.registry_auth.get(registry_url)
-        debug_logger.debug("Using auth config for refresh", 
-                          has_auth_config=bool(auth_config),
-                          auth_type=auth_config.get('auth_type') if auth_config else 'none')
+        registry_config = self.registry_config.get(registry_url)
+        debug_logger.debug("Using registry config for refresh", 
+                          has_registry_config=bool(registry_config),
+                          auth_type=registry_config.get('auth_type') if registry_config else 'none')
         
         if registry_url.startswith("local://"):
             # Handle local container runtime
@@ -1625,9 +1794,9 @@ class ContainerCardCatalog(App):
         else:
             debug_logger.debug("Checking remote registry status", 
                                registry_url=registry_url,
-                               has_auth=bool(auth_config))
+                               has_registry_config=bool(registry_config))
             
-            status_info = await registry_manager.check_registry_status(registry_url, auth_config)
+            status_info = await registry_manager.check_registry_status(registry_url, registry_config)
         
         debug_logger.debug("Registry status check completed", 
                           registry_url=registry_url,

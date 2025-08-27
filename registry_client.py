@@ -20,6 +20,33 @@ import httpx
 from urllib.parse import urljoin
 
 
+def sort_tags_by_timestamp(tags_list, manifest_metadata=None):
+    """Sort tags by timestamp (newest first) using manifest metadata if available"""
+    if not manifest_metadata:
+        # Fallback to alphabetical sorting
+        return sorted(tags_list, key=str.lower)
+    
+    # Build tag-to-timestamp mapping
+    tag_timestamps = {}
+    for manifest_sha, manifest_data in manifest_metadata.items():
+        tags_for_manifest = manifest_data.get("tag", [])
+        time_uploaded = manifest_data.get("timeUploadedMs", "0")
+        time_created = manifest_data.get("timeCreatedMs", "0")
+        
+        # Use upload time if available, otherwise creation time
+        timestamp = int(time_uploaded) if time_uploaded != "0" else int(time_created)
+        
+        for tag in tags_for_manifest:
+            tag_timestamps[tag] = timestamp
+    
+    # Sort by timestamp (newest first), then alphabetically
+    def tag_sort_key(tag_name):
+        timestamp = tag_timestamps.get(tag_name, 0)
+        return (-timestamp, tag_name.lower())
+    
+    return sorted(tags_list, key=tag_sort_key)
+
+
 class RegistryClient:
     """HTTP client for Docker Registry API v2 with authentication support"""
     
@@ -525,15 +552,15 @@ class RegistryManager:
         if len(self.api_call_log) > 100:
             self.api_call_log = self.api_call_log[-100:]
     
-    async def check_registry_status(self, registry_url: str, auth_config: Dict[str, str] = None) -> Dict[str, Any]:
+    async def check_registry_status(self, registry_url: str, registry_config: Dict[str, str] = None) -> Dict[str, Any]:
         """Check if registry is accessible and get basic info"""
-        # Use auth config if provided
+        # Use registry config if provided
         client_kwargs = {'base_url': registry_url, 'tui_debug_logger': self.tui_debug_logger}
-        if auth_config:
+        if registry_config:
             client_kwargs.update({
-                'username': auth_config.get('username'),
-                'password': auth_config.get('password'),
-                'auth_type': auth_config.get('auth_type', 'none')
+                'username': registry_config.get('username'),
+                'password': registry_config.get('password'),
+                'auth_type': registry_config.get('auth_type', 'none')
             })
         
         async with RegistryClient(**client_kwargs) as client:
@@ -544,13 +571,56 @@ class RegistryManager:
             catalog_response = await client.get_catalog()
             self.add_api_call(catalog_response)
             
+            # Test monitored repositories if configured
+            monitored_repo_accessible = False
+            monitored_repos = registry_config.get('monitored_repos', []) if registry_config else []
+            
+            if monitored_repos and self.tui_debug_logger:
+                self.tui_debug_logger.debug("Testing monitored repository access for status check", 
+                                          monitored_repos_count=len(monitored_repos),
+                                          registry_url=registry_url)
+            
+            if monitored_repos:
+                # Test the first monitored repo to see if we have working auth
+                test_repo = monitored_repos[0]
+                try:
+                    test_response = await client.get_tags(test_repo)
+                    self.add_api_call(test_response)
+                    
+                    if test_response["status_code"] == 200:
+                        monitored_repo_accessible = True
+                        if self.tui_debug_logger:
+                            self.tui_debug_logger.debug("Monitored repository access test succeeded", 
+                                                      test_repo=test_repo,
+                                                      status_code=test_response["status_code"])
+                    elif self.tui_debug_logger:
+                        self.tui_debug_logger.debug("Monitored repository access test failed", 
+                                                  test_repo=test_repo,
+                                                  status_code=test_response["status_code"])
+                except Exception as e:
+                    if self.tui_debug_logger:
+                        self.tui_debug_logger.debug("Monitored repository access test exception", 
+                                                  test_repo=test_repo,
+                                                  error=str(e))
+            
             # Determine repo count
             repo_count = "Unknown"
             if catalog_response["status_code"] == 200 and catalog_response.get("json"):
                 repos = catalog_response["json"].get("repositories", [])
-                repo_count = str(len(repos))
+                catalog_count = len(repos)
+                
+                # If we also have monitored repos, show total count with monitored in parentheses
+                if monitored_repos and len(monitored_repos) > 0:
+                    total_count = catalog_count + len(monitored_repos)
+                    repo_count = f"{total_count}({len(monitored_repos)})"
+                else:
+                    repo_count = str(catalog_count)
+            elif monitored_repo_accessible:
+                repo_count = f"{len(monitored_repos)}({len(monitored_repos)})"
             
-            # Determine overall status based on both endpoints
+            # Determine overall status based on endpoints, auth config, and monitored repo access
+            has_auth = registry_config and (registry_config.get('username') or registry_config.get('password'))
+            
             if version_response["status_code"] == 200 and catalog_response["status_code"] == 200:
                 # Full access - both version and catalog work
                 status = "✅"
@@ -561,8 +631,23 @@ class RegistryManager:
                 status = "🟡"
                 api_version = "v2"
                 connection_status = "Partial (auth needed)"
+            elif version_response["status_code"] == 200:
+                # Version works but catalog restricted - still partial access
+                status = "🟡"
+                api_version = "v2"
+                connection_status = "Partial (catalog restricted)"
+            elif monitored_repo_accessible:
+                # Monitored repository access works - this is the key test for auth
+                status = "🟡"
+                api_version = "v2 (auth)"
+                connection_status = "Monitored repos accessible"
+            elif has_auth and (version_response["status_code"] == 401 or catalog_response["status_code"] == 401):
+                # 401s but we have auth configured - potential access
+                status = "🟡"
+                api_version = "v2 (auth)"
+                connection_status = "Auth configured"
             else:
-                # No access - neither endpoint works
+                # No access - endpoints fail and no auth configured
                 status = "❌"
                 api_version = "Unknown"
                 connection_status = f"Error {version_response['status_code']}"
@@ -575,20 +660,83 @@ class RegistryManager:
                 "connection_status": connection_status
             }
     
-    async def get_repositories(self, registry_url: str, limit: int = 50, auth_config: Dict[str, str] = None, offset: int = 0) -> List[Dict[str, Any]]:
+    async def get_repositories(self, registry_url: str, limit: int = 50, registry_config: Dict[str, str] = None, offset: int = 0) -> Dict[str, Any]:
         """Get repositories for a registry"""
-        # Use auth config if provided
+        # Use registry config if provided
         client_kwargs = {'base_url': registry_url, 'tui_debug_logger': self.tui_debug_logger}
-        if auth_config:
+        if registry_config:
             client_kwargs.update({
-                'username': auth_config.get('username'),
-                'password': auth_config.get('password'),
-                'auth_type': auth_config.get('auth_type', 'none'),
-                'auth_scope': auth_config.get('auth_scope', 'registry:catalog:*')
+                'username': registry_config.get('username'),
+                'password': registry_config.get('password'),
+                'auth_type': registry_config.get('auth_type', 'none'),
+                'auth_scope': registry_config.get('auth_scope', 'registry:catalog:*')
             })
         
         async with RegistryClient(**client_kwargs) as client:
-            # Handle pagination for large catalogs (like Quay)
+            # First, fetch monitored repositories if configured
+            monitored_repos = registry_config.get('monitored_repos', []) if registry_config else []
+            monitored_repo_data = []
+            failed_monitored_repos = []
+            
+            if monitored_repos:
+                if self.tui_debug_logger:
+                    self.tui_debug_logger.debug("Fetching monitored repositories first", 
+                                              monitored_count=len(monitored_repos),
+                                              monitored_repos=monitored_repos)
+                
+                for repo_name in monitored_repos:
+                    try:
+                        # Always load full tag info for monitored repos
+                        tags_response = await client.get_tags(repo_name)
+                        self.add_api_call(tags_response)
+                        
+                        if tags_response["status_code"] == 200:
+                            response_json = tags_response.get("json", {})
+                            all_tags = response_json.get("tags", [])
+                            manifest_metadata = response_json.get("manifest", {})
+                            tag_count = len(all_tags)
+                            
+                            # Get recent tags using timestamp-based sorting
+                            sorted_tags = sort_tags_by_timestamp(all_tags, manifest_metadata)
+                            recent_tags = sorted_tags[:3]  # Take first 3 (newest)
+                            recent_tags_display = ", ".join(recent_tags) if recent_tags else "No recent tags"
+                            
+                            monitored_repo_data.append({
+                                "name": repo_name,
+                                "tag_count": tag_count,
+                                "recent_tags": recent_tags,
+                                "recent_tags_display": recent_tags_display,
+                                "last_updated": "Unknown",
+                                "is_monitored": True  # Mark as monitored for display
+                            })
+                            
+                            if self.tui_debug_logger:
+                                self.tui_debug_logger.debug("Monitored repo fetched successfully", 
+                                                          repo=repo_name,
+                                                          tag_count=tag_count)
+                        else:
+                            # Failed to fetch monitored repo
+                            failed_monitored_repos.append({
+                                "name": repo_name,
+                                "error": f"Status {tags_response['status_code']}"
+                            })
+                            
+                            if self.tui_debug_logger:
+                                self.tui_debug_logger.debug("Monitored repo fetch failed", 
+                                                          repo=repo_name,
+                                                          status_code=tags_response['status_code'])
+                    except Exception as e:
+                        failed_monitored_repos.append({
+                            "name": repo_name,
+                            "error": str(e)
+                        })
+                        
+                        if self.tui_debug_logger:
+                            self.tui_debug_logger.debug("Monitored repo fetch exception", 
+                                                      repo=repo_name,
+                                                      error=str(e))
+            
+            # Now handle regular catalog pagination
             all_repositories = []
             next_page_token = None
             page_size = min(100, limit + offset)  # Get enough to cover offset + limit
@@ -699,11 +847,14 @@ class RegistryManager:
                     self.add_api_call(tags_response)
                     
                     if tags_response["status_code"] == 200:
-                        all_tags = tags_response.get("json", {}).get("tags", [])
+                        response_json = tags_response.get("json", {})
+                        all_tags = response_json.get("tags", [])
+                        manifest_metadata = response_json.get("manifest", {})
                         tag_count = len(all_tags)
                         
-                        # Get recent tags (exclude 'latest', take up to 3)
-                        recent_tags = [tag for tag in all_tags if tag != "latest"][:3]
+                        # Get recent tags using timestamp-based sorting
+                        sorted_tags = sort_tags_by_timestamp(all_tags, manifest_metadata)
+                        recent_tags = sorted_tags[:3]  # Take first 3 (newest)
                         recent_tags_display = ", ".join(recent_tags) if recent_tags else "No recent tags"
                     else:
                         tag_count = 0
@@ -723,12 +874,43 @@ class RegistryManager:
                     "last_updated": "Unknown"
                 })
             
-            # Sort repositories by name (alphabetical)
-            repo_data.sort(key=lambda x: x['name'].lower())
+            # Filter out monitored repos from catalog to avoid duplicates
+            monitored_repo_names = {repo['name'] for repo in monitored_repo_data}
+            catalog_repo_data = [repo for repo in repo_data if repo['name'] not in monitored_repo_names]
+            
+            # Add failed monitored repos as error entries (always show them)
+            for failed_repo in failed_monitored_repos:
+                monitored_repo_data.append({
+                    "name": failed_repo["name"],
+                    "tag_count": "Error",
+                    "recent_tags": [],
+                    "recent_tags_display": f"❌ {failed_repo['error']}",
+                    "last_updated": "Error",
+                    "is_monitored": True,
+                    "is_error": True
+                })
+            
+            # Sort monitored repos alphabetically (will be handled by UI for direction)
+            monitored_repo_data.sort(key=lambda x: x['name'].lower())
+            
+            # Sort catalog repos alphabetically
+            catalog_repo_data.sort(key=lambda x: x['name'].lower())
+            
+            # Combine: monitored repos always at top, then catalog repos
+            final_repo_data = monitored_repo_data + catalog_repo_data
+            
+            if self.tui_debug_logger:
+                self.tui_debug_logger.debug("Final repository data assembled", 
+                                          total_repos=len(final_repo_data),
+                                          monitored_repos=len(monitored_repo_data),
+                                          catalog_repos=len(catalog_repo_data),
+                                          failed_monitored=len(failed_monitored_repos),
+                                          monitored_names=[repo['name'] for repo in monitored_repo_data],
+                                          first_few_repo_types=[f"{repo['name']}:{'⭐' if repo.get('is_monitored') else '📦'}" for repo in final_repo_data[:5]])
             
             # Return repository data with pagination metadata
             return {
-                "repositories": repo_data,
+                "repositories": final_repo_data,
                 "pagination": {
                     "method": "link_header" if next_page_token else "complete",
                     "next_page_token": next_page_token,
@@ -737,10 +919,15 @@ class RegistryManager:
                     "has_more": bool(next_page_token),
                     "final_offset": offset,
                     "final_limit": limit
+                },
+                "monitored_repos_status": {
+                    "total_monitored": len(monitored_repos),
+                    "successful": len(monitored_repo_data) - len(failed_monitored_repos),
+                    "failed": failed_monitored_repos
                 }
             }
     
-    async def continue_repositories_pagination(self, registry_url: str, next_page_token: str, auth_config: Dict[str, str] = None, page_size: int = 100) -> Dict[str, Any]:
+    async def continue_repositories_pagination(self, registry_url: str, next_page_token: str, registry_config: Dict[str, str] = None, page_size: int = 100) -> Dict[str, Any]:
         """Continue repository pagination using next_page token from Link headers"""
         if self.tui_debug_logger:
             self.tui_debug_logger.debug("Continuing pagination with next_page token", 
@@ -749,14 +936,14 @@ class RegistryManager:
                                       token_length=len(next_page_token) if next_page_token else 0,
                                       method="LINK_HEADER_CONTINUATION")
         
-        # Use auth config if provided
+        # Use registry config if provided
         client_kwargs = {'base_url': registry_url, 'tui_debug_logger': self.tui_debug_logger}
-        if auth_config:
+        if registry_config:
             client_kwargs.update({
-                'username': auth_config.get('username'),
-                'password': auth_config.get('password'),
-                'auth_type': auth_config.get('auth_type', 'none'),
-                'auth_scope': auth_config.get('auth_scope', 'registry:catalog:*')
+                'username': registry_config.get('username'),
+                'password': registry_config.get('password'),
+                'auth_type': registry_config.get('auth_type', 'none'),
+                'auth_scope': registry_config.get('auth_scope', 'registry:catalog:*')
             })
         
         async with RegistryClient(**client_kwargs) as client:
@@ -822,11 +1009,14 @@ class RegistryManager:
                     self.add_api_call(tags_response)
                     
                     if tags_response["status_code"] == 200:
-                        all_tags = tags_response.get("json", {}).get("tags", [])
+                        response_json = tags_response.get("json", {})
+                        all_tags = response_json.get("tags", [])
+                        manifest_metadata = response_json.get("manifest", {})
                         tag_count = len(all_tags)
                         
-                        # Get recent tags (exclude 'latest', take up to 3)
-                        recent_tags = [tag for tag in all_tags if tag != "latest"][:3]
+                        # Get recent tags using timestamp-based sorting
+                        sorted_tags = sort_tags_by_timestamp(all_tags, manifest_metadata)
+                        recent_tags = sorted_tags[:3]  # Take first 3 (newest)
                         recent_tags_display = ", ".join(recent_tags) if recent_tags else "No recent tags"
                     else:
                         tag_count = 0

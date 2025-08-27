@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from textual.app import ComposeResult
 from textual.containers import Vertical, Horizontal, ScrollableContainer
-from textual.widgets import Static, Button, Input, Select
+from textual.widgets import Static, Button, Input, Select, TextArea
 from textual.screen import ModalScreen
 from textual.message import Message
 import aiohttp
@@ -55,6 +55,11 @@ class RegistryConfigModal(ModalScreen):
     }
     
     .form_input {
+        margin: 0 0 1 0;
+    }
+    
+    .monitored_repos_textarea {
+        height: 8;
         margin: 0 0 1 0;
     }
     
@@ -150,6 +155,15 @@ class RegistryConfigModal(ModalScreen):
                 ], id="auth_type", classes="form_input")
                 yield auth_select
                 
+                # Monitored repositories section
+                yield Static("📌 Monitored Repositories", classes="section_title")
+                yield Static("Always fetch these repositories with full tag info (one per line):", classes="help_text")
+                yield TextArea(
+                    text="",
+                    id="monitored_repos",
+                    classes="form_input monitored_repos_textarea"
+                )
+                
                 # Scope settings
                 yield Static("🎯 Authorization Scope", classes="section_title")
                 yield Input(
@@ -197,6 +211,10 @@ class RegistryConfigModal(ModalScreen):
         # Set initial registry type value (saved or auto-detected)
         registry_type_select = self.query_one("#registry_type", Select)
         registry_type_select.value = self.get_current_registry_type()
+        
+        # Set initial monitored repositories
+        monitored_repos_text = self.query_one("#monitored_repos", TextArea)
+        monitored_repos_text.text = self.get_current_monitored_repos()
     
     def get_current_username(self) -> str:
         """Get current username from registry data"""
@@ -209,6 +227,11 @@ class RegistryConfigModal(ModalScreen):
     def get_current_cache_ttl(self) -> int:
         """Get current cache TTL from registry data"""
         return self.registry_data.get('cache_ttl', 900)  # Default 15 minutes
+    
+    def get_current_monitored_repos(self) -> str:
+        """Get current monitored repositories as newline-separated string"""
+        monitored_repos = self.registry_data.get('monitored_repos', [])
+        return '\n'.join(monitored_repos)
     
     def get_current_registry_type(self) -> str:
         """Get current registry type from registry data"""
@@ -665,6 +688,7 @@ class RegistryConfigModal(ModalScreen):
         auth_type = self.query_one("#auth_type", Select).value
         registry_type = self.query_one("#registry_type", Select).value
         auth_scope = self.query_one("#auth_scope", Input).value or "registry:catalog:*"
+        monitored_repos_text = self.query_one("#monitored_repos", TextArea).text
         try:
             max_repos = int(self.query_one("#max_repos", Input).value or "100")
         except ValueError:
@@ -673,6 +697,29 @@ class RegistryConfigModal(ModalScreen):
             cache_ttl = int(self.query_one("#cache_ttl", Input).value or "900")
         except ValueError:
             cache_ttl = 900  # Default fallback
+        
+        # Parse and validate monitored repositories
+        monitored_repos = []
+        seen_repos = set()
+        duplicates_found = []
+        
+        if monitored_repos_text.strip():
+            for line_num, line in enumerate(monitored_repos_text.split('\n'), 1):
+                repo = line.strip()
+                if repo:  # Skip empty lines
+                    if repo.lower() in seen_repos:
+                        duplicates_found.append(f"Line {line_num}: '{repo}'")
+                    else:
+                        seen_repos.add(repo.lower())
+                        monitored_repos.append(repo)
+        
+        # Show notification about duplicates if found
+        if duplicates_found:
+            duplicate_list = ", ".join(duplicates_found)
+            try:
+                self.app.notify(f"Removed {len(duplicates_found)} duplicate repositories: {duplicate_list}", timeout=4)
+            except Exception:
+                pass  # Ignore notification errors
         
         # Create configuration dict
         config = {
@@ -685,6 +732,7 @@ class RegistryConfigModal(ModalScreen):
             "auth_scope": auth_scope,
             "max_repos": max_repos,
             "cache_ttl": cache_ttl,
+            "monitored_repos": monitored_repos,
         }
         
         # Log configuration save
@@ -697,8 +745,15 @@ class RegistryConfigModal(ModalScreen):
             "password_provided": bool(password)
         })
         
-        # Send message to parent with configuration
-        self.post_message(self.ConfigSaved(config))
+        # Send message to all screens via app to ensure repository screen gets it
+        # Try both app-level and direct posting to ensure all screens receive it
+        self.app.post_message(self.ConfigSaved(config))
+        
+        # Also send to all active screens explicitly
+        for screen in self.app.screen_stack:
+            if hasattr(screen, 'on_registry_config_modal_config_saved'):
+                screen.post_message(self.ConfigSaved(config))
+        
         self.dismiss()
     
     def action_cancel(self) -> None:
