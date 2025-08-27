@@ -543,9 +543,12 @@ class TagsScreen(Screen):
         """Update details panel for given row index"""
         details_panel = self.query_one("#tag_details", TagDetailsPanel)
         
-        if row_index < len(self.tag_data):
+        if row_index >= 0 and row_index < len(self.tag_data):
             tag = self.tag_data[row_index]
             details_panel.update_tag_info(tag)
+        else:
+            # No valid selection or no tag data - show default message
+            details_panel.update_tag_info(None)
     
     
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
@@ -553,12 +556,12 @@ class TagsScreen(Screen):
         self.update_details_for_row(event.cursor_row)
         
         # Auto-load more tags when approaching the bottom
-        if not self.all_tags_loaded:
+        if not self.all_tags_loaded and event.cursor_row >= 0:
             current_row = event.cursor_row
             total_rows = len(self.tag_data)
             
             # Load more when within 10 rows of the bottom
-            if total_rows - current_row <= 10:
+            if total_rows > 0 and total_rows - current_row <= 10:
                 self.current_limit += 50
                 self.notify(f"🏷️ Loading more tags... ({total_rows} → {self.current_limit})", timeout=2)
                 if self.mock_mode:

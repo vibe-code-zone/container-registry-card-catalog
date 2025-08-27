@@ -11,7 +11,7 @@ A Terminal User Interface (TUI) application for browsing and exploring container
 🔐 **Authentication Support** - Configure credentials for registries (basic, bearer, token auth)  
 ⭐ **Monitored Repositories** - Priority repositories always fetched first with full tag info and visual indicators  
 📊 **Smart Repository Counts** - Display format shows total(monitored) e.g., "1003(3)" for comprehensive status  
-💾 **In-Memory Configuration** - Registry settings persist during session (file persistence planned)  
+💾 **Persistent Configuration** - Registry settings and monitored repositories survive application restarts  
 📦 **Repository Browsing** - Navigate through repositories with an intuitive interface  
 🏷️ **Tag Exploration** - View and explore container image tags with chronological sorting and real timestamps  
 📋 **Manifest Details** - Deep dive into image manifests, layers, and digests (local & remote)  
@@ -199,8 +199,9 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 - [x] **Authentication support** - Basic, bearer, and token authentication ✅
 - [x] **Search and filtering capabilities** - Repository name filtering ✅
 - [x] **Monitored repositories** - Priority repo configuration ✅
+- [x] **Configuration file support** - Persistent monitored repos and settings storage ✅
+- [ ] **Encrypted credential storage** - Secure authentication persistence (Phase 2)
 - [ ] **TLS/HTTPS with certificate validation** - Currently disabled for compatibility
-- [ ] **Export functionality** - Save repository lists, tag information  
-- [ ] **Configuration file support** - Persistent auth and monitored repos storage
+- [ ] **Export functionality** - Save repository lists, tag information
 - [ ] **Image comparison features** - Compare tags and manifests
 - [ ] **Registry state persistence** - Remember pagination/position when navigating

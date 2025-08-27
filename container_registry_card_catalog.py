@@ -28,6 +28,7 @@ from textual.message import Message
 from mock_data import mock_registry
 from registry_client import registry_manager
 from local_container_client import LocalContainerClient
+from config_manager import config_manager
 from debug_console import DebugConsoleScreen
 from tags_view import TagsScreen
 from registry_config_modal import RegistryConfigModal
@@ -130,8 +131,8 @@ class TUIDebugLogger:
             self.logger.error(full_message)
 
 
-# Global debug logger instance
-debug_logger = TUIDebugLogger()
+# Global debug logger instance (disabled by default, enabled in main() if --debug flag provided)
+debug_logger = TUIDebugLogger(enabled=False)
 
 
 class RegistryDetailsPanel(Vertical):
@@ -1252,6 +1253,45 @@ class ContainerCardCatalog(App):
         self.sort_reversed = False
         self.registry_config = {}  # In-memory registry config storage: {registry_url: {username, password, auth_type, monitored_repos, etc}}
         
+        # Load saved configuration on startup
+        self._load_saved_configuration()
+    
+    def _load_saved_configuration(self) -> None:
+        """Load saved registry configurations from file"""
+        try:
+            saved_config = config_manager.load_config()
+            
+            debug_logger.debug("Loading saved configuration", 
+                              registry_count=len(saved_config.get('registries', [])),
+                              config_version=saved_config.get('version', 'unknown'))
+            
+            # Load registry configurations into memory
+            for registry_config in saved_config.get('registries', []):
+                registry_url = registry_config.get('url')
+                if registry_url:
+                    # Convert saved config to in-memory format (Phase 1: no credentials)
+                    self.registry_config[registry_url] = {
+                        'username': '',  # Phase 1: credentials not persisted yet
+                        'password': '',  # Phase 1: credentials not persisted yet
+                        'auth_type': 'none',  # Phase 1: auth not persisted yet
+                        'registry_type': 'auto',
+                        'auth_scope': registry_config.get('settings', {}).get('auth_scope', 'registry:catalog:*'),
+                        'max_repos': registry_config.get('settings', {}).get('max_repos', 100),
+                        'cache_ttl': registry_config.get('settings', {}).get('cache_ttl', 900),
+                        'monitored_repos': registry_config.get('monitored_repos', [])
+                    }
+            
+            if self.registry_config:
+                total_monitored = sum(len(config.get('monitored_repos', [])) for config in self.registry_config.values())
+                debug_logger.debug("Saved configuration loaded", 
+                                  loaded_registries=len(self.registry_config),
+                                  total_monitored_repos=total_monitored)
+            else:
+                debug_logger.debug("No saved registry configurations found")
+                
+        except Exception as e:
+            debug_logger.error(f"Failed to load saved configuration: {e}")
+        
     def compose(self) -> ComposeResult:
         """Create the TUI layout"""
         yield Header()
@@ -1701,6 +1741,31 @@ class ContainerCardCatalog(App):
             'cache_ttl': config.get('cache_ttl', 900),
             'monitored_repos': config.get('monitored_repos', [])
         }
+        
+        # Save to persistent storage (Phase 1: monitored repos and settings only, no credentials)
+        try:
+            settings = {
+                'max_repos': config.get('max_repos', 100),
+                'cache_ttl': config.get('cache_ttl', 900),
+                'auth_scope': config.get('auth_scope', 'registry:catalog:*')
+            }
+            
+            success = config_manager.save_registry_config(
+                registry_url=registry_url,
+                registry_name=config.get('registry_name', 'Unknown Registry'),
+                monitored_repos=config.get('monitored_repos', []),
+                settings=settings
+            )
+            
+            if success:
+                debug_logger.debug("Registry configuration persisted to file", 
+                                  registry_url=registry_url,
+                                  monitored_repos_count=len(config.get('monitored_repos', [])))
+            else:
+                debug_logger.warning("Failed to persist registry configuration to file")
+                
+        except Exception as e:
+            debug_logger.error(f"Error saving registry configuration to file: {e}")
         
         # Update registry data with auth info for display
         for registry in self.registry_data:

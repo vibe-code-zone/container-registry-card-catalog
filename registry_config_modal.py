@@ -735,15 +735,8 @@ class RegistryConfigModal(ModalScreen):
             "monitored_repos": monitored_repos,
         }
         
-        # Log configuration save
-        await self.log_to_debug("CONFIG", f"Saving configuration for {config['registry_name']}", {
-            "registry": config['registry_url'],
-            "registry_type": registry_type,
-            "username": username,
-            "auth_type": auth_type,
-            "cache_ttl": cache_ttl,
-            "password_provided": bool(password)
-        })
+        # Configuration save logging is handled by the main app's debug_logger
+        # No need to log to API debug console as this is a TUI operation, not HTTP API
         
         # Send message to all screens via app to ensure repository screen gets it
         # Try both app-level and direct posting to ensure all screens receive it
