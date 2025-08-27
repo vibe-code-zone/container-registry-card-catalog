@@ -506,7 +506,39 @@ class RepositoryScreen(Screen):
                 else:
                     mock_url = "mock://public-registry"  # Default fallback
             
-            # Get repositories from mock data based on mapped registry
+            # Get monitored repositories first (like real registry mode)
+            monitored_repos = self.registry_config.get('monitored_repos', []) if self.registry_config else []
+            monitored_repo_data = []
+            
+            debug_logger.debug("Mock mode: Loading monitored repositories first",
+                              monitored_repos_count=len(monitored_repos),
+                              monitored_repos=monitored_repos)
+            
+            # Process monitored repositories first
+            for repo_name in monitored_repos:
+                tags_response = mock_registry.get_tags(mock_url, repo_name)
+                if tags_response["status_code"] == 200:
+                    all_tags = tags_response["json"]["tags"]
+                    tag_count = len(all_tags)
+                    
+                    # Get recent tags (exclude 'latest', take up to 3)
+                    recent_tags = [tag for tag in all_tags if tag != "latest"][:3]
+                    recent_tags_display = ", ".join(recent_tags) if recent_tags else "No recent tags"
+                    
+                    monitored_repo_data.append({
+                        "name": repo_name,
+                        "tag_count": tag_count,
+                        "recent_tags": recent_tags,
+                        "recent_tags_display": recent_tags_display,
+                        "last_updated": "Mock time",
+                        "is_monitored": True  # Mark as monitored for display
+                    })
+                    
+                    debug_logger.debug("Mock mode: Monitored repo processed",
+                                      repo=repo_name,
+                                      tag_count=tag_count)
+            
+            # Get repositories from mock data catalog
             catalog_response = mock_registry.get_catalog(mock_url)
             if catalog_response["status_code"] == 200:
                 all_repositories = catalog_response["json"]["repositories"]
@@ -518,7 +550,14 @@ class RepositoryScreen(Screen):
                 if len(repositories) >= len(all_repositories):
                     self.all_repositories_loaded = True
                 
+                # Process catalog repositories (excluding monitored ones to avoid duplicates)
+                monitored_repo_names = {repo['name'] for repo in monitored_repo_data}
+                catalog_repo_data = []
+                
                 for repo_name in repositories:
+                    if repo_name in monitored_repo_names:
+                        continue  # Skip monitored repos to avoid duplicates
+                        
                     # Get mock tag data for each repository using the mapped mock URL
                     tags_response = mock_registry.get_tags(mock_url, repo_name)
                     if tags_response["status_code"] == 200:
@@ -533,15 +572,21 @@ class RepositoryScreen(Screen):
                         recent_tags = []
                         recent_tags_display = "Unknown"
                     
-                    repo_data = {
+                    catalog_repo_data.append({
                         "name": repo_name,
                         "tag_count": tag_count,
                         "recent_tags": recent_tags,
                         "recent_tags_display": recent_tags_display,
                         "last_updated": "Mock time"
-                    }
-                    
-                    self.repository_data.append(repo_data)
+                    })
+                
+                # Combine: monitored repos first, then catalog repos (like real registry mode)
+                self.repository_data = monitored_repo_data + catalog_repo_data
+                
+                debug_logger.debug("Mock mode: Repository data assembled",
+                                  total_repos=len(self.repository_data),
+                                  monitored_repos=len(monitored_repo_data),
+                                  catalog_repos=len(catalog_repo_data))
                 
                 # Apply filter to populate table
                 self.apply_filter()
@@ -1205,6 +1250,8 @@ class RepositoryScreen(Screen):
 class ContainerCardCatalog(App):
     """Main TUI application for browsing container registries"""
     
+    TITLE = "Container Registry Card Catalog - Beta"
+    
     CSS = """
     Screen {
         layout: horizontal;
@@ -1315,6 +1362,40 @@ class ContainerCardCatalog(App):
         # Start background task to check real registries
         if not self.mock_mode and self.registries:
             self.run_worker(self.check_real_registries(), exclusive=True)
+    
+    def on_screen_resume(self) -> None:
+        """Called when returning to this screen - sync details panel with cursor"""
+        debug_logger.debug("Registry screen resume called")
+        # Use call_later to ensure the screen is fully active before syncing
+        self.call_later(lambda: self._sync_details_with_cursor())
+    
+    def on_focus(self) -> None:
+        """Called when screen gets focus - also sync details panel"""
+        debug_logger.debug("Registry screen focus gained")
+        self._sync_details_with_cursor()
+        
+    def _sync_details_with_cursor(self) -> None:
+        """Helper method to sync details panel with current cursor position"""
+        try:
+            registry_table = self.query_one("#registry_list", DataTable)
+            if hasattr(registry_table, 'cursor_coordinate') and registry_table.cursor_coordinate:
+                current_row = registry_table.cursor_coordinate[0]
+                debug_logger.debug("Syncing registry details panel with cursor",
+                                  current_cursor_row=current_row,
+                                  total_registries=len(self.registry_data),
+                                  force_update=True)
+                self.update_details_for_row(current_row)
+                
+                # Force focus on the table to ensure events are properly wired
+                registry_table.focus()
+            else:
+                debug_logger.debug("No cursor coordinate found, using row 0")
+                self.update_details_for_row(0)
+        except Exception as e:
+            debug_logger.debug("Details panel sync failed, fallback to row 0",
+                              error=str(e))
+            # Fallback to first row if cursor sync fails
+            self.update_details_for_row(0)
         
     def load_registries(self) -> None:
         """Load and populate registry data"""
@@ -1356,7 +1437,20 @@ class ContainerCardCatalog(App):
                             mock_url = "mock://public-registry"  # Default fallback
                     
                     if mock_url in mock_registry.registries:
-                        repo_count = len(mock_registry.registries[mock_url]["repositories"])
+                        catalog_repos = mock_registry.registries[mock_url]["repositories"]
+                        catalog_count = len(catalog_repos)
+                        
+                        # Check for monitored repos from loaded config
+                        registry_config = self.registry_config.get(registry_url, {})
+                        monitored_repos = registry_config.get('monitored_repos', [])
+                        
+                        if monitored_repos and len(monitored_repos) > 0:
+                            # Count how many monitored repos are NOT in the catalog
+                            monitored_not_in_catalog = [repo for repo in monitored_repos if repo not in catalog_repos]
+                            total_repos = catalog_count + len(monitored_not_in_catalog)
+                            repo_count = f"{total_repos}({len(monitored_repos)})"
+                        else:
+                            repo_count = catalog_count
                     else:
                         repo_count = 0
                 else:
@@ -1406,6 +1500,11 @@ class ContainerCardCatalog(App):
     
     def update_details_for_row(self, row_index: int) -> None:
         """Update details panel for given row index"""
+        debug_logger.debug("Registry details update requested", 
+                          row_index=row_index,
+                          total_registries=len(self.registry_data),
+                          registry_name=self.registry_data[row_index]["name"] if row_index < len(self.registry_data) else "OUT_OF_BOUNDS")
+        
         details_panel = self.query_one("#registry_details", RegistryDetailsPanel)
         
         if row_index < len(self.registry_data):
@@ -1479,7 +1578,22 @@ class ContainerCardCatalog(App):
     
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         """Handle registry row highlighting (auto-select)"""
-        self.update_details_for_row(event.cursor_row)
+        # Only process registry highlighting when this is the main app (not a sub-screen)
+        screen_stack_length = len(self.app.screen_stack)
+        is_main_screen = screen_stack_length <= 1  # Main screen or no screens pushed
+        
+        if is_main_screen:
+            debug_logger.debug("Registry row highlighted - processing (main screen active)",
+                              cursor_row=event.cursor_row,
+                              total_registries=len(self.registry_data),
+                              screen_stack_length=screen_stack_length)
+            self.update_details_for_row(event.cursor_row)
+        else:
+            debug_logger.debug("Registry row highlighted - ignoring (sub-screen active)",
+                              cursor_row=event.cursor_row,
+                              total_registries=len(self.registry_data),
+                              screen_stack_length=screen_stack_length,
+                              current_screen=str(type(self.app.screen).__name__))
     
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle registry selection and double-click detection"""
@@ -1792,7 +1906,9 @@ class ContainerCardCatalog(App):
             self.run_worker(self._refresh_single_registry(registry_url), exclusive=False)
             self.notify("🔄 Refreshing registry status...")
         else:
-            debug_logger.debug("Skipping registry refresh in mock mode")
+            debug_logger.debug("Triggering mock mode registry refresh", registry_url=registry_url)
+            self._refresh_mock_registry_count(registry_url)
+            self.notify("✅ Registry configuration updated")
     
     async def _refresh_single_registry(self, registry_url: str) -> None:
         """Refresh status for a single registry"""
@@ -1892,6 +2008,90 @@ class ContainerCardCatalog(App):
             if registry_table.cursor_coordinate[0] == registry_row_index:
                 debug_logger.debug("Updating details panel for refreshed registry")
                 self.update_details_for_row(registry_row_index)
+    
+    def _refresh_mock_registry_count(self, registry_url: str) -> None:
+        """Refresh repository count display for mock registry after config changes"""
+        debug_logger.debug("Starting mock registry count refresh", registry_url=registry_url)
+        registry_table = self.query_one("#registry_list", DataTable)
+        
+        # Find the registry in our data
+        registry_row_index = None
+        for idx, registry_data in enumerate(self.registry_data):
+            if registry_data["url"] == registry_url:
+                registry_row_index = idx
+                break
+        
+        if registry_row_index is None:
+            debug_logger.error("Registry not found in data for mock refresh", 
+                              registry_url=registry_url,
+                              available_registries=[r.get('url') for r in self.registry_data])
+            return
+        
+        debug_logger.debug("Found registry for mock refresh", 
+                          registry_index=registry_row_index,
+                          registry_name=self.registry_data[registry_row_index].get('name', 'Unknown'))
+        
+        # Recalculate repository count with updated monitored repos
+        from mock_data import mock_registry
+        if registry_url.startswith("mock://"):
+            mock_url = registry_url
+        else:
+            # Map real registry URLs to mock equivalents
+            if "quay.io" in registry_url:
+                mock_url = "mock://quay-io"
+            elif "gcr.io" in registry_url:
+                mock_url = "mock://gcr-io"
+            else:
+                mock_url = "mock://public-registry"  # Default fallback
+        
+        if mock_url in mock_registry.registries:
+            catalog_repos = mock_registry.registries[mock_url]["repositories"]
+            catalog_count = len(catalog_repos)
+            
+            # Check for updated monitored repos from config
+            registry_config = self.registry_config.get(registry_url, {})
+            monitored_repos = registry_config.get('monitored_repos', [])
+            
+            if monitored_repos and len(monitored_repos) > 0:
+                # Count how many monitored repos are NOT in the catalog
+                monitored_not_in_catalog = [repo for repo in monitored_repos if repo not in catalog_repos]
+                total_repos = catalog_count + len(monitored_not_in_catalog)
+                updated_repo_count = f"{total_repos}({len(monitored_repos)})"
+                
+                debug_logger.debug("Mock registry count calculation details", 
+                                  catalog_count=catalog_count,
+                                  monitored_total=len(monitored_repos),
+                                  monitored_not_in_catalog=len(monitored_not_in_catalog),
+                                  monitored_not_in_catalog_names=monitored_not_in_catalog,
+                                  final_total=total_repos)
+            else:
+                updated_repo_count = str(catalog_count)
+            
+            debug_logger.debug("Mock registry count recalculated", 
+                              registry_url=registry_url,
+                              catalog_count=catalog_count,
+                              monitored_count=len(monitored_repos),
+                              updated_display=updated_repo_count)
+            
+            # Update the registry data
+            self.registry_data[registry_row_index]["repo_count"] = updated_repo_count
+            
+            # Update the table row
+            registry_table.update_cell_at((registry_row_index, 3), updated_repo_count)
+            
+            debug_logger.debug("Mock registry table updated", 
+                              row_index=registry_row_index,
+                              new_count=updated_repo_count)
+            
+            # If this row is currently selected, update details
+            if hasattr(registry_table, 'cursor_coordinate') and registry_table.cursor_coordinate:
+                if registry_table.cursor_coordinate[0] == registry_row_index:
+                    debug_logger.debug("Updating details panel for refreshed mock registry")
+                    self.update_details_for_row(registry_row_index)
+        else:
+            debug_logger.debug("Mock registry not found in mock data", 
+                              mock_url=mock_url,
+                              registry_url=registry_url)
     
     def action_quit(self) -> None:
         """Quit the application"""

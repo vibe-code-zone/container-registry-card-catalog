@@ -611,7 +611,9 @@ class RegistryManager:
                 
                 # If we also have monitored repos, show total count with monitored in parentheses
                 if monitored_repos and len(monitored_repos) > 0:
-                    total_count = catalog_count + len(monitored_repos)
+                    # Count monitored repos that are NOT in catalog (avoid double-counting)
+                    monitored_not_in_catalog = [repo for repo in monitored_repos if repo not in repos]
+                    total_count = catalog_count + len(monitored_not_in_catalog)
                     repo_count = f"{total_count}({len(monitored_repos)})"
                 else:
                     repo_count = str(catalog_count)

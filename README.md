@@ -4,6 +4,28 @@
 
 A Terminal User Interface (TUI) application for browsing and exploring container registries built with [Textual](https://textual.textualize.io/).
 
+## Screenshots
+
+<p align="center">
+  <img src="images/container-registry-card-catalog-tui-001.png" alt="Main Registry View" width="400"/>
+  <img src="images/container-registry-card-catalog-tui-002.png" alt="Repository Browser" width="400"/>
+</p>
+
+<p align="center">
+  <img src="images/container-registry-card-catalog-tui-002-filter.png" alt="Repository Filtering" width="400"/>
+  <img src="images/container-registry-card-catalog-tui-003.png" alt="Tag Explorer" width="400"/>
+</p>
+
+<p align="center">
+  <img src="images/container-registry-card-catalog-tui-004.png" alt="Tag Detail Modal" width="400"/>
+  <img src="images/container-registry-card-catalog-tui-005.png" alt="Configuration Modal" width="400"/>
+</p>
+
+<p align="center">
+  <img src="images/container-registry-card-catalog-tui-006.png" alt="Debug Console" width="400"/>
+  <img src="images/container-registry-card-catalog-tui-007.png" alt="API Call Detail Modal" width="400"/>
+</p>
+
 ## Features
 
 🌐 **Multi-Registry Support** - Connect to multiple container registries simultaneously  
@@ -126,6 +148,8 @@ The application includes comprehensive mock data for testing and development:
 - **Diverse Tag Patterns**: Version tags, environment tags, architecture variants
 - **Manifest Compatibility**: Both Docker and OCI manifest formats
 - **Layered Images**: Realistic layer sizes and hierarchies
+- **Full Configuration Support**: Mock mode supports all configuration features including monitored repositories with immediate UI updates
+- **Accurate Repository Counting**: Proper de-duplication logic ensures repository counts match real registry behavior
 
 ## Registry Support
 
