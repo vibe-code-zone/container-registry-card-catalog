@@ -25,22 +25,22 @@ A Terminal User Interface (TUI) application for browsing and exploring container
 
 ```bash
 # Run with mock data (no real registry connections)
-python container_card_catalog.py --mock
+python container_registry_card_catalog.py --mock
 
 # Browse local podman containers
-python container_card_catalog.py --local podman
+python container_registry_card_catalog.py --local podman
 
 # Browse local docker containers  
-python container_card_catalog.py --local docker
+python container_registry_card_catalog.py --local docker
 
 # Connect to specific registries
-python container_card_catalog.py --registry registry.example.com --registry quay.io
+python container_registry_card_catalog.py --registry registry.example.com --registry quay.io
 
 # Mix local and remote registries
-python container_card_catalog.py --local podman --registry quay.io
+python container_registry_card_catalog.py --local podman --registry quay.io
 
 # View help
-python container_card_catalog.py --help
+python container_registry_card_catalog.py --help
 ```
 
 ### Navigation
@@ -85,7 +85,7 @@ pip install textual aiohttp
 ```bash
 git clone <repository-url>
 cd container-registry-card-catalog
-python container_card_catalog.py --mock
+python container_registry_card_catalog.py --mock
 ```
 
 ## Architecture
@@ -93,14 +93,14 @@ python container_card_catalog.py --mock
 The application follows a modular architecture:
 
 ```
-container_card_catalog.py   # Main application and registry view
-├── registry_client.py      # Registry API client and manager
-├── local_container_client.py # Local podman/docker container support
-├── mock_data.py           # Mock registry data for testing
-├── debug_console.py       # Debug console for API monitoring
-├── tags_view.py          # Tags listing and navigation
-├── tag_detail_modal.py   # Detailed tag information modal
-└── api_detail_modal.py   # API call details modal
+container_registry_card_catalog.py   # Main application and registry view
+├── registry_client.py               # Registry API client and manager
+├── local_container_client.py        # Local podman/docker container support
+├── mock_data.py                     # Mock registry data for testing
+├── debug_console.py                 # Debug console for API monitoring
+├── tags_view.py                     # Tags listing and navigation
+├── tag_detail_modal.py              # Detailed tag information modal
+└── api_detail_modal.py              # API call details modal
 ```
 
 ## Mock Mode
@@ -151,7 +151,7 @@ The application supports multiple registry types:
 Use mock mode extensively during development:
 
 ```bash
-python container_card_catalog.py --mock
+python container_registry_card_catalog.py --mock
 ```
 
 ## Attribution

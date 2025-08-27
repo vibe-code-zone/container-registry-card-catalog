@@ -353,20 +353,21 @@ class LocalContainerClient:
             latest_image_id = None
             description = repo_data.get('description', f"{repo_data['image_count']} images, {len(set(repo_data['tags']))} unique tags")
             
-            if repo_data['tag_details']:
+            tag_details = repo_data.get('tag_details', {})
+            if tag_details:
                 # Find the tag with the most recent creation time
-                latest_tag = max(repo_data['tag_details'].keys(), 
+                latest_tag = max(tag_details.keys(), 
                                 key=lambda t: repo_data.get('creation_times', {}).get(t, 0), 
                                 default=None)
                 if latest_tag:
-                    latest_image_id = repo_data['tag_details'][latest_tag].get('full_digest', 'Unknown')
+                    latest_image_id = tag_details[latest_tag].get('full_digest', 'Unknown')
             
             repo_list.append({
                 'name': repo_name,
                 'tag_count': len(set(repo_data['tags'])),  # Unique tags
                 'recent_tags': recent_tags,
                 'recent_tags_display': recent_tags_display,
-                'tag_details': repo_data['tag_details'],  # Include full tag details
+                'tag_details': tag_details,  # Include full tag details
                 'size': self._format_size(repo_data['total_size']),
                 'last_updated': self._format_timestamp(repo_data['last_updated'] or 0),
                 'description': description,
