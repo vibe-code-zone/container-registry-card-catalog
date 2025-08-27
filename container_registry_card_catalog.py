@@ -1404,7 +1404,7 @@ class ContainerCardCatalog(App):
         # Use provided registries or sample data
         if self.registries:
             # Use the registries passed from command line
-            sample_registries = []
+            all_registries = []
             for registry_url in self.registries:
                 if registry_url.startswith("mock://"):
                     status = "🧪"
@@ -1456,7 +1456,7 @@ class ContainerCardCatalog(App):
                 else:
                     repo_count = "Checking..."
                 
-                sample_registries.append({
+                all_registries.append({
                     "status": status,
                     "name": name,
                     "url": registry_url,
@@ -1466,7 +1466,7 @@ class ContainerCardCatalog(App):
         else:
             # Fallback sample data for development
             if self.mock_mode:
-                sample_registries = [
+                all_registries = [
                     {"status": "🧪", "name": "Public Registry", "url": "mock://public-registry", "repo_count": 10, "api_version": "v2 (Mock)"},
                     {"status": "🧪", "name": "Quay.io Mock", "url": "mock://quay-io", "repo_count": 5, "api_version": "v2 (Mock)"},
                     {"status": "🧪", "name": "GCR Mock", "url": "mock://gcr-io", "repo_count": 5, "api_version": "v2 (Mock)"},
@@ -1475,15 +1475,40 @@ class ContainerCardCatalog(App):
                     {"status": "🧪", "name": "Massive Test", "url": "mock://massive-registry", "repo_count": 603, "api_version": "v2 (Mock)"},
                 ]
             else:
-                sample_registries = [
+                all_registries = [
                     {"status": "⏳", "name": "Registry One", "url": "registry-1.example.io", "repo_count": "Checking...", "api_version": "Checking..."},
                     {"status": "⏳", "name": "Red Hat Quay", "url": "quay.io", "repo_count": "Checking...", "api_version": "Checking..."},
                 ]
         
-        # Sort registries by name (alphabetical)
-        sample_registries.sort(key=lambda x: x["name"].lower(), reverse=self.sort_reversed)
+        # Smart sorting: local:// first (podman before docker), then localhost/IPs/http://, then https://
+        def registry_sort_key(registry):
+            url = registry["url"].lower()
             
-        for registry in sample_registries:
+            # Priority 1: Local runtimes (local://) - podman before docker
+            if url.startswith("local://"):
+                if "podman" in url:
+                    return (1, 0, url)  # podman first
+                elif "docker" in url:
+                    return (1, 1, url)  # docker second
+                else:
+                    return (1, 2, url)  # other local runtimes after
+            
+            # Priority 2: Local network (localhost, 127.0.0.1, private IPs, http://)
+            elif (url.startswith("localhost") or 
+                  url.startswith("127.0.0.1") or 
+                  url.startswith("192.168.") or 
+                  url.startswith("10.") or 
+                  url.startswith("172.") or
+                  url.startswith("http://")):
+                return (2, 0, url)
+            
+            # Priority 3: Remote HTTPS registries
+            else:
+                return (3, 0, url)
+        
+        all_registries.sort(key=registry_sort_key, reverse=self.sort_reversed)
+            
+        for registry in all_registries:
             registry_table.add_row(
                 registry["status"],
                 registry["name"], 
