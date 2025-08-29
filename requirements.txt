@@ -11,6 +11,9 @@ textual>=0.45.0
 # HTTP client for registry API calls
 httpx>=0.25.0
 
+# Async HTTP client for registry operations
+aiohttp>=3.8.0
+
 # YAML parsing (if needed for config)
 pyyaml>=6.0
 

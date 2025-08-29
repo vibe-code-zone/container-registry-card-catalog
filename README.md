@@ -1,29 +1,29 @@
 # Container Registry Card Catalog
 
-![Container Registry Card Catalog](images/container-registry-card-catalog-001.jpeg)
+![Container Registry Card Catalog](https://raw.githubusercontent.com/vibe-code-zone/container-registry-card-catalog/main/images/container-registry-card-catalog-001.jpeg)
 
 A Terminal User Interface (TUI) application for browsing and exploring container registries built with [Textual](https://textual.textualize.io/).
 
 ## Screenshots
 
 <p align="center">
-  <img src="images/container-registry-card-catalog-tui-001.png" alt="Main Registry View" width="400"/>
-  <img src="images/container-registry-card-catalog-tui-002.png" alt="Repository Browser" width="400"/>
+  <img src="https://raw.githubusercontent.com/vibe-code-zone/container-registry-card-catalog/main/images/container-registry-card-catalog-tui-001.png" alt="Main Registry View" width="400"/>
+  <img src="https://raw.githubusercontent.com/vibe-code-zone/container-registry-card-catalog/main/images/container-registry-card-catalog-tui-002.png" alt="Repository Browser" width="400"/>
 </p>
 
 <p align="center">
-  <img src="images/container-registry-card-catalog-tui-002-filter.png" alt="Repository Filtering" width="400"/>
-  <img src="images/container-registry-card-catalog-tui-003.png" alt="Tag Explorer" width="400"/>
+  <img src="https://raw.githubusercontent.com/vibe-code-zone/container-registry-card-catalog/main/images/container-registry-card-catalog-tui-002-filter.png" alt="Repository Filtering" width="400"/>
+  <img src="https://raw.githubusercontent.com/vibe-code-zone/container-registry-card-catalog/main/images/container-registry-card-catalog-tui-003.png" alt="Tag Explorer" width="400"/>
 </p>
 
 <p align="center">
-  <img src="images/container-registry-card-catalog-tui-004.png" alt="Tag Detail Modal" width="400"/>
-  <img src="images/container-registry-card-catalog-tui-005.png" alt="Configuration Modal" width="400"/>
+  <img src="https://raw.githubusercontent.com/vibe-code-zone/container-registry-card-catalog/main/images/container-registry-card-catalog-tui-004.png" alt="Tag Detail Modal" width="400"/>
+  <img src="https://raw.githubusercontent.com/vibe-code-zone/container-registry-card-catalog/main/images/container-registry-card-catalog-tui-005.png" alt="Configuration Modal" width="400"/>
 </p>
 
 <p align="center">
-  <img src="images/container-registry-card-catalog-tui-006.png" alt="Debug Console" width="400"/>
-  <img src="images/container-registry-card-catalog-tui-007.png" alt="API Call Detail Modal" width="400"/>
+  <img src="https://raw.githubusercontent.com/vibe-code-zone/container-registry-card-catalog/main/images/container-registry-card-catalog-tui-006.png" alt="Debug Console" width="400"/>
+  <img src="https://raw.githubusercontent.com/vibe-code-zone/container-registry-card-catalog/main/images/container-registry-card-catalog-tui-007.png" alt="API Call Detail Modal" width="400"/>
 </p>
 
 ## Features

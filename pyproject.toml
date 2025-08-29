@@ -1,0 +1,62 @@
+# Container Registry Card Catalog - Package Configuration
+#
+# AIA: EAI Hin R Claude Code v1.0
+# Vibe-Coder: Andrew Potozniak <potozniak@redhat.com>
+# Session Date: 2025-08-28
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "container-registry-card-catalog"
+version = "0.0.1"
+description = "A Terminal User Interface for browsing container registries"
+authors = [{name = "Andrew Potozniak", email = "potozniak@redhat.com"}]
+license = {file = "LICENSE"}
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "textual>=0.41.0",
+    "httpx>=0.24.0",
+    "aiohttp>=3.8.0",
+    "pyyaml>=6.0",
+]
+keywords = ["container", "registry", "docker", "podman", "tui", "terminal"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/vibe-code-zone/container-registry-card-catalog"
+Repository = "https://github.com/vibe-code-zone/container-registry-card-catalog"
+Issues = "https://github.com/vibe-code-zone/container-registry-card-catalog/issues"
+
+[project.scripts]
+container-registry-card-catalog = "container_registry_card_catalog:main"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "container_registry_card_catalog.py",
+    "mock_data.py",
+    "registry_client.py",
+    "config_manager.py",
+    "local_container_client.py",
+    "debug_console.py",
+    "tags_view.py",
+    "registry_config_modal.py",
+    "tag_detail_modal.py",
+    "api_detail_modal.py",
+    "prompt_logger.py"
+]
