@@ -211,3 +211,4 @@ CLAUDE.md
 Sessions.md
 Prompts.md
 prompt_logger.py
+claude/
