@@ -101,22 +101,33 @@ python container_registry_card_catalog.py --help
 
 ## Installation
 
-### Requirements
+### Preferred Method: Install from PyPI
+
+Optional: Create a virtual environment first
+```bash
+python -m venv container-registry-env
+source container-registry-env/bin/activate  # On Windows: container-registry-env\Scripts\activate
+```
+
+Install the package:
+```bash
+pip install container-registry-card-catalog
+```
+
+Then run:
+```bash
+container-registry-card-catalog --help
+container-registry-card-catalog --mock
+```
+
+### Alternative: Run from Source
+
+#### Requirements
 
 - Python 3.8+
 - **For local container support**: podman or docker CLI tools
-- Required packages:
 
-```bash
-pip install -r requirements.txt
-```
-
-Or install manually:
-```bash
-pip install textual aiohttp
-```
-
-### Clone and Run
+#### Clone and Run
 
 ```bash
 git clone <repository-url>

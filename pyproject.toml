@@ -10,7 +10,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "container-registry-card-catalog"
-version = "0.0.1"
+version = "0.0.0-alpha2"
 description = "A Terminal User Interface for browsing container registries"
 authors = [{name = "Andrew Potozniak", email = "potozniak@redhat.com"}]
 license = {file = "LICENSE"}
@@ -58,5 +58,6 @@ packages = [
     "registry_config_modal.py",
     "tag_detail_modal.py",
     "api_detail_modal.py",
+    "info_modal.py",
     "prompt_logger.py"
 ]

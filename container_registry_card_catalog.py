@@ -28,6 +28,7 @@ from textual.message import Message
 from mock_data import mock_registry
 from registry_client import registry_manager
 from local_container_client import LocalContainerClient
+from info_modal import InfoModal
 from config_manager import config_manager
 from debug_console import DebugConsoleScreen
 from tags_view import TagsScreen
@@ -1288,6 +1289,7 @@ class ContainerCardCatalog(App):
         ("r", "reverse_sort", "Reverse Sort"),
         ("ctrl+d", "debug_console", "Debug Console"),
         ("c", "configure_registry", "Configure Registry"),
+        ("i", "show_info", "Info"),
     ]
     
     def __init__(self, registries: List[str], mock_mode: bool = False, **kwargs):
@@ -2117,6 +2119,11 @@ class ContainerCardCatalog(App):
             debug_logger.debug("Mock registry not found in mock data", 
                               mock_url=mock_url,
                               registry_url=registry_url)
+    
+    def action_show_info(self) -> None:
+        """Show application info modal"""
+        debug_logger.debug("Showing application info modal")
+        self.push_screen(InfoModal())
     
     def action_quit(self) -> None:
         """Quit the application"""
