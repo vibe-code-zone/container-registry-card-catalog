@@ -120,7 +120,7 @@ class InfoModal(ModalScreen):
                     yield Label("Andrew Potozniak <potozniak@redhat.com>", classes="info_value")
                     
                     yield Label("License:", classes="info_label")
-                    yield Label("MIT + VCL (Vibe Check License)", classes="info_value")
+                    yield Label("MIT + VCL-0.1-Experimental", classes="info_value")
                     
                     yield Label("AIA:", classes="info_label")
                     yield Label("[EAI Hin R Claude Code v1.0]", classes="info_value")
